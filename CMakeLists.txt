@@ -65,6 +65,7 @@ add_executable(ios_tests
   tests/writer_test.cpp
   tests/infer_test.cpp
   tests/loader_test.cpp
+  tests/app_test.cpp
 )
 target_include_directories(ios_tests PRIVATE tests)
 target_link_libraries(ios_tests PRIVATE ios_core GTest::gtest_main)
