@@ -71,3 +71,20 @@ target_include_directories(ios_tests PRIVATE tests)
 target_link_libraries(ios_tests PRIVATE ios_core GTest::gtest_main)
 include(GoogleTest)
 gtest_discover_tests(ios_tests)
+
+# CLI-level tests driving the built binary (covers argv parsing + exit codes).
+add_test(NAME cli_help COMMAND infer-onnx-shape --help)
+set_tests_properties(cli_help PROPERTIES PASS_REGULAR_EXPRESSION "usage:")
+
+add_test(NAME cli_usage_error COMMAND infer-onnx-shape)
+set_tests_properties(cli_usage_error PROPERTIES WILL_FAIL TRUE)
+
+# PASS_REGULAR_EXPRESSION makes CTest ignore the exit code (regex match alone
+# decides pass), so it cannot be combined with WILL_FAIL to assert BOTH a
+# nonzero exit AND the message. Split into two assertions instead.
+add_test(NAME cli_bad_input COMMAND infer-onnx-shape /no/such/input.onnx out.onnx)
+set_tests_properties(cli_bad_input PROPERTIES WILL_FAIL TRUE)
+
+add_test(NAME cli_bad_input_message COMMAND infer-onnx-shape /no/such/input.onnx out.onnx)
+set_tests_properties(cli_bad_input_message PROPERTIES
+  PASS_REGULAR_EXPRESSION "cannot open input file")

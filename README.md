@@ -1,7 +1,7 @@
 # infer-onnx-shape
 
-A C++ CLI that reads an ONNX model, infers the shape and element type of every
-tensor in the graph, and writes the annotated model back out as a valid ONNX
+A C++ CLI that reads an ONNX model, infers the shape and element type of the
+tensors in the graph, and writes the annotated model back out as a valid ONNX
 file. Value-dependent shapes (e.g. `Reshape`, `Slice`) are resolved via ONNX
 data propagation. The tool works even when the model's weights live in a
 separate external file that is not provided.

@@ -58,3 +58,24 @@ TEST(Inference, ReshapeResolvesFromComputedShape) {
   ASSERT_TRUE(h.has_value());
   EXPECT_EQ(*h, (std::vector<int64_t>{6, 4}));
 }
+
+// A non-broadcastable Add is a shape-inference error: strict mode must throw,
+// lenient mode must tolerate it.
+TEST(Inference, StrictModeThrowsOnInferenceError) {
+  onnx::GraphProto g;
+  ios::test::add_input(&g, "A", onnx::TensorProto::FLOAT, {2, 3});
+  ios::test::add_input(&g, "B", onnx::TensorProto::FLOAT, {4, 5});
+  ios::test::add_node(&g, "Add", {"A", "B"}, {"Y"});
+  ios::test::add_output(&g, "Y");
+  auto model = ios::test::make_model(g);
+
+  EXPECT_THROW(ios::infer_shapes(model, /*strict=*/true), std::runtime_error);
+
+  onnx::GraphProto g2;
+  ios::test::add_input(&g2, "A", onnx::TensorProto::FLOAT, {2, 3});
+  ios::test::add_input(&g2, "B", onnx::TensorProto::FLOAT, {4, 5});
+  ios::test::add_node(&g2, "Add", {"A", "B"}, {"Y"});
+  ios::test::add_output(&g2, "Y");
+  auto model2 = ios::test::make_model(g2);
+  EXPECT_NO_THROW(ios::infer_shapes(model2, /*strict=*/false));
+}
