@@ -17,13 +17,19 @@ void load_external_initializer(onnx::TensorProto& t, const fs::path& model_dir) 
   std::string location;
   int64_t offset = 0;
   int64_t length = -1;
-  for (const auto& e : t.external_data()) {
-    if (e.key() == "location")
-      location = e.value();
-    else if (e.key() == "offset")
-      offset = std::stoll(e.value());
-    else if (e.key() == "length")
-      length = std::stoll(e.value());
+  try {
+    for (const auto& e : t.external_data()) {
+      if (e.key() == "location")
+        location = e.value();
+      else if (e.key() == "offset")
+        offset = std::stoll(e.value());
+      else if (e.key() == "length")
+        length = std::stoll(e.value());
+    }
+  } catch (const std::exception& ex) {
+    std::cerr << "warning: malformed external_data offset/length for '"
+              << t.name() << "'; leaving it unloaded: " << ex.what() << "\n";
+    return;
   }
   if (location.empty()) return;
 

@@ -83,3 +83,30 @@ TEST(Loader, ToleratesMissingExternalFile) {
   EXPECT_EQ(model.graph().initializer(0).data_location(),
             onnx::TensorProto::EXTERNAL);
 }
+
+TEST(Loader, ToleratesMalformedExternalOffset) {
+  fs::path dir = fs::temp_directory_path() / "ios_ext_malformed";
+  fs::remove_all(dir);
+  fs::create_directories(dir);
+
+  onnx::GraphProto g;
+  ios::test::add_input(&g, "X", onnx::TensorProto::FLOAT, {2, 3, 4});
+  auto* t = g.add_initializer();
+  t->set_name("newshape");
+  t->set_data_type(onnx::TensorProto::INT64);
+  t->add_dims(2);
+  // Non-numeric length -> std::stoll would throw; loader must tolerate it.
+  ios::test::set_external(t, "weights.bin", /*offset=*/0, /*length=*/0);
+  // Overwrite the length entry with garbage.
+  for (auto& e : *t->mutable_external_data())
+    if (e.key() == "length") e.set_value("not-a-number");
+  ios::test::add_node(&g, "Reshape", {"X", "newshape"}, {"H"});
+  ios::test::add_node(&g, "Relu", {"H"}, {"Y"});
+  ios::test::add_output(&g, "Y");
+  auto model = ios::test::make_model(g);
+  { std::ofstream f(dir / "model.onnx", std::ios::binary); model.SerializeToOstream(&f); }
+
+  onnx::ModelProto loaded;
+  ASSERT_NO_THROW(loaded = ios::load((dir / "model.onnx").string()));
+  EXPECT_EQ(loaded.graph().initializer(0).data_location(), onnx::TensorProto::EXTERNAL);
+}
