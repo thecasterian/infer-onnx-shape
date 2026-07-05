@@ -20,8 +20,6 @@ provided.
 ## Non-goals
 
 - Reconstructing or synthesizing weight values.
-- Resolving value-dependent shapes when the required data lives in an absent
-  external weight file (see Known limitations).
 - Overriding or supplying input shapes from the CLI (may be added later; not
   in scope now).
 
@@ -33,6 +31,15 @@ protobuf `ModelProto`; shape inference is delegated to
 with the inferred type/shape of every intermediate tensor. Serializing the
 resulting `ModelProto` back out yields an ONNX file where all tensor shapes
 are recorded.
+
+Shape inference is run with data propagation enabled
+(`ShapeInferenceOptions.enable_data_propagation = true`). This drives the
+per-operator `PartialDataPropagationFunction` (e.g. `Shape`, `Reshape`,
+`Slice`, `Concat`) so that value-dependent output shapes are computed from the
+actual constant values carried by initializers, rather than left symbolic.
+Inline initializer values are read directly by the library; values stored in
+an external weight file are loaded by the Loader (below) before inference so
+they are equally available.
 
 ## Architecture and data flow
 
@@ -52,18 +59,29 @@ Four small, independently-testable components:
 
 2. **Loader** (`loader.{h,cpp}`)
    - `onnx::ModelProto load(const std::string& path)`
-   - Parses the protobuf directly (`ParseFromIstream`). Deliberately does NOT
-     invoke ONNX's external-data loader.
-   - Rationale: initializer dims and element types live in the `TensorProto`
-     inside the model file itself; only the raw bytes are external. Shape
-     inference does not need the bytes, so a missing weight file does not
-     block the tool.
+   - Parses the protobuf directly (`ParseFromIstream`).
+   - Then loads external initializer data: for each initializer with
+     `data_location() == TensorProto::EXTERNAL`, reads the `external_data`
+     entries (`location`, `offset`, `length`), opens the referenced file
+     relative to the model's directory, reads the bytes into `raw_data`, and
+     clears the external-data marker. This is the C++ equivalent of ONNX's
+     `load_external_data_for_model`, so value-dependent shape inference can
+     see the values.
+   - Missing-weights tolerance: if a referenced external file does not exist,
+     that initializer is left without data (a warning is logged) and loading
+     continues. Structural inference still works because initializer dims and
+     element types live in the `TensorProto` itself; only value-dependent
+     shapes that specifically needed the absent bytes remain unresolved.
 
 3. **Inference** (`infer.{h,cpp}`)
-   - Wraps `onnx::shape_inference::InferShapes(model, ...)`.
+   - Wraps `onnx::shape_inference::InferShapes(model, registry, options)` with
+     `ShapeInferenceOptions.enable_data_propagation = true` so value-dependent
+     ops (`Reshape`, `Slice`, `Shape`, `Concat`, ...) resolve concrete output
+     shapes from constant values.
    - Default mode is lenient: nodes whose shape cannot be inferred are skipped
      rather than fatal, maximizing annotation coverage.
-   - `--strict` opts into failing on the first inference error.
+   - `--strict` opts into failing on the first inference error (maps to
+     `ShapeInferenceOptions.error_mode`).
 
 4. **Writer** (`writer.{h,cpp}`)
    - `void save(const onnx::ModelProto& model, const std::string& path)` via
@@ -87,10 +105,11 @@ drop-in, shape-annotated replacement usable by downstream tools.
 
 ## Known limitations
 
-Value-dependent operators (for example `Reshape` or `Slice` whose shape
-operand is an externally-stored initializer) may leave some downstream shapes
-unresolved when the weight file is absent, because those bytes are genuinely
-unavailable. Everything structurally inferable is still annotated.
+Value-dependent shapes are resolved whenever the driving values are available
+— that is, from inline initializers or from external initializers whose
+backing file is present. They remain unresolved only when the needed values
+come from a runtime graph input, or from an external file that is genuinely
+absent. Everything structurally inferable is always annotated.
 
 ## Build
 
@@ -104,6 +123,13 @@ unavailable. Everything structurally inferable is still annotated.
 - Test 1: construct a tiny `ModelProto` in memory (e.g. `Conv -> Relu`, or
   `Gemm`) with declared input shapes but no weight data; run the inference
   component; assert `value_info` is populated with the expected shapes.
-- Test 2: build a model with an external initializer reference and no backing
-  data file; assert the tool still loads and annotates it.
+- Test 2 (data propagation, inline): a `Reshape` whose shape operand is an
+  inline `int64` initializer; assert the output tensor's shape is resolved to
+  the concrete target shape (not left symbolic).
+- Test 3 (external data present): a model with an external initializer plus a
+  backing data file on disk; assert the Loader reads the bytes and the
+  dependent shape is resolved.
+- Test 4 (external data absent): the same model with the backing file
+  removed; assert the tool still loads, logs a warning, and annotates every
+  structurally inferable tensor.
 - Wire tests into CTest.
