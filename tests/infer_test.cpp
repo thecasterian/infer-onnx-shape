@@ -37,3 +37,24 @@ TEST(Inference, ReshapeResolvesFromInlineInitializer) {
   ASSERT_TRUE(h.has_value());
   EXPECT_EQ(*h, (std::vector<int64_t>{6, 4}));
 }
+
+// Data propagation is genuinely required: the Reshape shape operand is
+// computed by an upstream Shape node, not read from an initializer.
+TEST(Inference, ReshapeResolvesFromComputedShape) {
+  onnx::GraphProto g;
+  // Template tensor whose shape [6,4] we recover at runtime via Shape.
+  ios::test::add_input(&g, "T", onnx::TensorProto::FLOAT, {6, 4});
+  // Data tensor to be reshaped (24 elements).
+  ios::test::add_input(&g, "D", onnx::TensorProto::FLOAT, {24});
+  ios::test::add_node(&g, "Shape", {"T"}, {"shp"});          // shp = [6,4], computed
+  ios::test::add_node(&g, "Reshape", {"D", "shp"}, {"H"});   // needs data prop to know shp
+  ios::test::add_node(&g, "Relu", {"H"}, {"Y"});
+  ios::test::add_output(&g, "Y");
+  auto model = ios::test::make_model(g);
+
+  ios::infer_shapes(model, /*strict=*/false);
+
+  auto h = ios::test::get_shape(model.graph(), "H");
+  ASSERT_TRUE(h.has_value());
+  EXPECT_EQ(*h, (std::vector<int64_t>{6, 4}));
+}
